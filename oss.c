@@ -1,5 +1,5 @@
 // Name: Mindy Zheng
-// Date: 2/17/2024 
+// Date: 3/5/2024 
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -11,6 +11,10 @@
 #include <stdlib.h>
 #include <string.h> 
 #include <sys/wait.h>
+#include <time.h> 
+#include <stdbool.h> 
+#include <sys/msg.h>
+#include <errno.h> 
 
 void help() { 
 	printf("This program is designed to launch child processes specified by the user. Here are the parameters:\n"); 
@@ -19,6 +23,7 @@ void help() {
 	printf("[-s simul] - specifies maximum number of child processes that can simultaneously run.\n");
 	printf("[-t timeLimit for children] - specifies the bound of time a child process will be launched for ... b/w 1 second and -t]\n"); 
 	printf("[-i intervalInMs] - specifies how often a children should be launched based on sys clock in milliseconds\n"); 
+	printf("[-f logfile] - creates logfile where output and info of oss will be\n"); 
 }
 
 // the Process Table does not have to be in shared memory 
@@ -45,6 +50,7 @@ void printTable(int PID, int startS, int startN, struct PCB processTable[20]) {
 #define NANO_INCREMENT 100000
 #define MSCONVERSION  1000000
 #define ONE_SEC_NANO 1000000000 // 1,000,000,000 (billion) nanoseconds is equal to 1 second
+#define QUARTER_MS 250000000 // 250 milliseconds is equal to 250,000,000 ns
 
 void incrementClock(int *sec, int *nano) {
 	(*nano) += NANO_INCREMENT; 
@@ -58,6 +64,20 @@ void incrementClock(int *sec, int *nano) {
 #define SH_KEY1 89918991
 #define SH_KEY2 89928992
 #define PERMS 0777
+
+// Message queue struct 
+typedef struct msgbuffer { 
+	long mtype; 
+	int intData; 
+} msgbuffer;
+
+int random_num(int min, int max) { 
+	if (min == max) { 
+		return min; 
+	} else { 
+		return min + rand() / (RAND_MAX / (max-min + 1) + 1);
+	}
+} 
 
 /* random number generator - if it is called with -t 7, then when calling worker processes, it should call them with a time interval randomly between 1 second and 7 seconds (with nanoseconds also random).*/ 
 
@@ -107,7 +127,7 @@ int main(int argc, char **argv) {
         perror("Failed to set up the ITIMER_PROF interval timer");
         return 1;
     }
-	printf("Initializing Shared memory process"); 
+	printf("Initializing Shared memory process\n"); 
 
 	// Shared memory system clock 
 	// Channel for seconds 
@@ -132,6 +152,7 @@ int main(int argc, char **argv) {
 		processTable[i].startSeconds = 0;
 		processTable[i].startNano = 0;
     }
+
 	
 	int opt; 
 	const char optstr[] = "hn:s:t:i:"; 
@@ -139,7 +160,8 @@ int main(int argc, char **argv) {
 	int simul = 0; // maximum number of child processes that can simultaneously run -s 
 	int timeLimit = 0; // time limit for children -t
 	int intervalMs = 1 * MSCONVERSION; 
-	
+
+
 	// oss [-h] [-n proc] [-s simul] [-t timelimitForChildren] [-i intervalInMsToLaunchChildren]
 	while ((opt = getopt(argc, argv, optstr)) != -1) { 
 		switch(opt) { 
@@ -174,6 +196,15 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// Bound from 1 -t. 
+	srand(time(0)); 
+	int rand_seconds = random_num(1, timeLimit); // random seconds
+	int random_nano = random_num(0, 999999999); 
+	char str_seconds[10], str_nanoseconds[10]; 
+	sprintf(str_seconds, "%d", rand_seconds); 
+	sprintf(str_nanoseconds, "%d", random_nano); 
+
+
 	/*
 	while (stillChildrenToLaunch) {
 		incrementClock();
@@ -185,6 +216,24 @@ int main(int argc, char **argv) {
 		possiblyLaunchNewChild(obeying process limits and time bound limits)
 }
 	*/
+
+	// creating and setting up message queue                             
+	msgbuffer buf;
+    int msqid;
+    key_t msgkey;                                                               system("touch msgq.txt");
+
+    // key for our message queue 	                                       
+	if ((msgkey = ftok("msgq.txt", 1)) == -1) {
+        perror("ftok");
+        exit(1);                                                                }
+
+    if ((msqid = msgget(msgkey, 0666 | IPC_CREAT)) == -1) {                         perror("msgget in parent");
+        exit(1);
+    }
+
+    printf("Message queue successfully set up!!!\n");
+
+	
 	int launched = 0, simultaneous_count = 0, pid_finished = 0, flag = 0, finished_total = 0, interval = 0;
 	pid_t pid; 
 	
@@ -201,7 +250,7 @@ int main(int argc, char **argv) {
 			flag = 1; // flag indicates launching a process 
 			interval = 0; 
 			simultaneous_count++; 
-			launched++; // incremeent count of launched processes 
+			launched++; // increment count of launched processes 
 			pid = fork(); 
 		} 
 		

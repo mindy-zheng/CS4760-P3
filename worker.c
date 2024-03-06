@@ -7,6 +7,7 @@
 #include <math.h> 
 
 // By Mindy Zheng
+// Date: 3/5/24
 
 #define SH_KEY1 89918991
 #define SH_KEY2 89928992
@@ -56,7 +57,7 @@ int main(int argc, char** argv) {
 	if (*seconds - timer == 1) { 
 			timer = *seconds; 
 			printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n----%d seconds have passed since starting\n", pid, ppid, *seconds, *nanoseconds, term_seconds, term_nanoseconds, timeElapsed);
-        }
+        } 
 	} 
 	// Termination state 
 	 printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n---- TERMINATING\n", pid, ppid, *seconds, *nanoseconds, term_seconds, term_nanoseconds);
