@@ -14,7 +14,14 @@
 #define PERMS 0777
 
 
+// Setting up message queue: 
+typedef struct msgbuffer {                                                      long mtype;
+    int intData;
+} msgbuffer;
+
+
 int main(int argc, char** argv) {
+
 	printf("We are in worker, setting up memory pointers\n"); // Debugging statement 
 	
 	// Setting up shared memory pointer for seconds channel 
@@ -36,6 +43,25 @@ int main(int argc, char** argv) {
 	// Create simulated system clock - seconds & nanoseconds 
 	int sys_seconds = *seconds; 
 	int sys_nano = *nanoseconds; 
+
+	// Setting up message queue to communicate: 
+	msgbuffer buf; 
+	buf.mtype = getpid(); 
+	int msqid = 0; 
+	key_t msgkey; 
+
+	// Get a key for our message queue 
+	if ((msgkey = ftok("msgq.txt", 1)) == -1) {
+		perror("ftok failure");
+        exit(1);
+    } 
+	
+	// Access existing queue 
+	if ((msqid = msgget(msgkey, PERMS)) == -1) {
+		perror("msgget in child");
+		exit(1);
+	}
+
 
 	// Calculate time limit 
 	int term_seconds = atoi(argv[1]) + sys_seconds; 
