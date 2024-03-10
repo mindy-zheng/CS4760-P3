@@ -5,6 +5,9 @@
 #include<sys/shm.h>
 #include<sys/ipc.h>
 #include <math.h> 
+#include <string.h> 
+#include <errno.h>
+#include <sys/msg.h>
 
 // By Mindy Zheng
 // Date: 3/5/24
@@ -57,8 +60,14 @@ int main(int argc, char** argv) {
     } 
 	
 	// Access existing queue 
-	if ((msqid = msgget(msgkey, PERMS)) == -1) {
+	if ((msqid = msgget(msgkey, 0644)) == -1) {
 		perror("msgget in child");
+		exit(1);
+	}
+	printf("Child %d has access to the queue\n",getpid());
+	// receive a message, but only one for us
+	if ( msgrcv(msqid, &buf, sizeof(msgbuffer), getpid(), 0) == -1) {
+		perror("failed to receive message from parent\n");
 		exit(1);
 	}
 

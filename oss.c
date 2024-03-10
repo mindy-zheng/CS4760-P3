@@ -96,6 +96,24 @@ void updatePCB(struct PCB* processTable, pid_t pid_finished) {
 	}
 }
 
+// Function to write into logfile 
+void writeLog(int PID, int startS, int startN, struct PCB processTable[20], char *logfile) {  
+	FILE *lptr = fopen(logfile, "a"); 
+	if (lptr == NULL) { 
+		printf("Unable to open logfile to write into"); 
+		exit(1); 
+	} 
+                                    
+	fprintf(lptr, "OSS PID: %d    SysClockS: %d   SysclockNano: %d\n", PID, startS, startN);
+    fprintf(lptr, "Process Table: \n");
+    fprintf(lptr, "------------------\n");                                                                                              
+	fprintf(lptr, "Entry Occupied               PID    StartS          StartN\n");
+    for (int i = 0; i < 20; i++) {
+        fprintf(lptr, "%-6d %-20d %-6d %-12d %-12d\n", i, processTable[i].occupied, processTable[i].pid, processTable[i].startSeconds, processTable[i].startNano);
+    }
+}
+
+
 // Function to add to PCB
 void addPCB(struct PCB* processTable, pid_t pid, int* seconds, int* nanoseconds) {
 	int j = 0;
@@ -115,7 +133,6 @@ void addPCB(struct PCB* processTable, pid_t pid, int* seconds, int* nanoseconds)
         }
     }
 }
- 
 
 int main(int argc, char **argv) { 
 	// setting up signal handlers 
@@ -145,6 +162,24 @@ int main(int argc, char **argv) {
     }
 	int *nanoseconds = shmat(sh_nano, 0, 0); 
 
+	//  // creating and setting up message queue
+    msgbuffer buf;
+    int msqid;
+    key_t msgkey;                                                               
+	system("touch msgq.txt");
+
+    // key for our message queue
+    if ((msgkey = ftok("msgq.txt", 1)) == -1) {
+        perror("ftok");
+        exit(1);                                                                }
+
+    if ((msqid = msgget(msgkey, 0666 | IPC_CREAT)) == -1) {                         
+		perror("msgget in parent");
+        exit(1);
+    }
+
+    printf("Message queue successfully set up!!!\n");
+
 	// initializing table 
 	for (int i = 0; i < 20; i++) { 
 		processTable[i].occupied = 0;
@@ -155,14 +190,14 @@ int main(int argc, char **argv) {
 
 	
 	int opt; 
-	const char optstr[] = "hn:s:t:i:"; 
+	const char optstr[] = "hn:s:t:i:f:"; 
 	int proc = 0; // total number of processes -n 
 	int simul = 0; // maximum number of child processes that can simultaneously run -s 
 	int timeLimit = 0; // time limit for children -t
 	int intervalMs = 1 * MSCONVERSION; 
+	char *filename = NULL; // initialize filename 
 
-
-	// oss [-h] [-n proc] [-s simul] [-t timelimitForChildren] [-i intervalInMsToLaunchChildren]
+	// oss [-h] [-n proc] [-s simul] [-t timelimitForChildren] [-i intervalInMsToLaunchChildren] [-f logfile] 
 	while ((opt = getopt(argc, argv, optstr)) != -1) { 
 		switch(opt) { 
 			case 'h': 
@@ -171,7 +206,7 @@ int main(int argc, char **argv) {
 			case 'n': 
 				proc = atoi(optarg); 
 				if (proc <= 0) { 
-					printf("Error n arg: must be a positive integer.\n"); 
+					printf("Error -n arg: must be a positive integer.\n"); 
 					help(); 
 					exit(EXIT_FAILURE);
 				} 
@@ -179,7 +214,7 @@ int main(int argc, char **argv) {
 			case 's': 
 				simul = atoi(optarg); 
 				if (simul <= 0) {
-                    printf("Error simul arg: must be a positive integer.\n");
+                    printf("Error -simul arg: must be a positive integer.\n");
                     help();
                     exit(EXIT_FAILURE);
                 }
@@ -190,48 +225,34 @@ int main(int argc, char **argv) {
 			case 'i': 
 				intervalMs = atoi(optarg)*pow(10,6);
 				break; 
+			case 'f':
+				filename = optarg; // get filename 
+				break; 
 			default: 
 				help(); 
 				exit(EXIT_FAILURE);
 		}
 	}
-
-	// Bound from 1 -t. 
+	
+	if (filename == NULL) { 
+		printf("Did not read filename\n"); 
+		help(); 
+		exit(EXIT_FAILURE); 
+	} 
+	
+	FILE *fptr = fopen(filename, "w"); 
+	if (fptr == NULL) { 
+		perror("Error in file creation"); 
+		exit(EXIT_FAILURE);
+	} 
+	
+	// Bound from 1 to -t. 
 	srand(time(0)); 
 	int rand_seconds = random_num(1, timeLimit); // random seconds
 	int random_nano = random_num(0, 999999999); 
 	char str_seconds[10], str_nanoseconds[10]; 
 	sprintf(str_seconds, "%d", rand_seconds); 
 	sprintf(str_nanoseconds, "%d", random_nano); 
-
-
-	/*
-	while (stillChildrenToLaunch) {
-		incrementClock();
-		Every half a second of simulated clock time, output the process table to the screen
-		checkIfChildHasTerminated();
-		if (childHasTerminated) {
-			updatePCBOfTerminatedChild;
-		}
-		possiblyLaunchNewChild(obeying process limits and time bound limits)
-}
-	*/
-
-	// creating and setting up message queue                             
-	msgbuffer buf;
-    int msqid;
-    key_t msgkey;                                                               system("touch msgq.txt");
-
-    // key for our message queue 	                                       
-	if ((msgkey = ftok("msgq.txt", 1)) == -1) {
-        perror("ftok");
-        exit(1);                                                                }
-
-    if ((msqid = msgget(msgkey, 0666 | IPC_CREAT)) == -1) {                         perror("msgget in parent");
-        exit(1);
-    }
-
-    printf("Message queue successfully set up!!!\n");
 
 	
 	int launched = 0, simultaneous_count = 0, pid_finished = 0, flag = 0, finished_total = 0, interval = 0;
@@ -278,11 +299,18 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
+
 	printf("Detatching shared memory channels in oss - seconds and nanoseconds\n"); 
 	shmdt(seconds);
     shmdt(nanoseconds);
     shmctl(sh_sec, IPC_RMID, NULL);
     shmctl(sh_nano, IPC_RMID, NULL);
+
+	printf("Removing message queues in parent\n"); 
+    if (msgctl(msqid, IPC_RMID, NULL) == -1) {
+		perror("msgctl to get rid of queue in parent failed");
+		exit(1);
+	}
 
 
 	return 0; 
@@ -298,11 +326,19 @@ int main(int argc, char **argv) {
             	kill(processTable[i].pid, SIGTERM);
         	}
     	}
-  
+  	
+		// Removing shared memory 
 		shmdt(seconds);
     	shmdt(nanoseconds);
     	shmctl(sh_sec, IPC_RMID, NULL); 
-    	shmctl(sh_nano, IPC_RMID, NULL);
+		shmctl(sh_nano, IPC_RMID, NULL);
+		// Removing message queues  
+		/*
+		if (msgctl(msqid, IPC_RMID, NULL) == -1) {
+            perror("msgctl to get rid of queue in parent failed");
+            exit(1);
+        }	*/
+
     	exit(1);
 	}
 
